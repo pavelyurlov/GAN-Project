@@ -1,7 +1,7 @@
 # GAN-Project
 
 
-Data:
+## Data:
 
 The training sample is shared here: https://cernbox.cern.ch/index.php/s/RkZoMRBofrhqzZm.
 
