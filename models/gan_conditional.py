@@ -17,8 +17,8 @@ def get_tf_dataset(dataset, batch_size):
     iterator = tf.compat.v1.data.make_one_shot_iterator(dataset_final)
     return iterator.get_next()
 
-def sample_noise_batch(bsize, X_DIMS):
-    return np.random.normal(size=(bsize, X_DIMS)).astype('float32')
+def sample_noise_batch(bsize, NOISE_DIMS):
+    return np.random.normal(size=(bsize, NOISE_DIMS)).astype('float32')
 
 
 class Model:
@@ -27,12 +27,13 @@ class Model:
         
         GAN_TYPE = "Jensen-Shannon"
         X_DIMS, Y_DIMS = 3, 5
+        NOISE_DIMS = 3
 
         generator_activation = keras.activations.elu
 
         with tf.name_scope("Generator"):
             generator = Sequential(name="Generator")
-            generator.add(L.InputLayer([2 * X_DIMS], name='noise'))
+            generator.add(L.InputLayer([X_DIMS + NOISE_DIMS], name='noise'))
             for i in range(n_hidden_layers):
                 generator.add(L.Dense(output_dim, activation=generator_activation))
             generator.add(L.Dense(Y_DIMS, activation=None))
@@ -40,23 +41,24 @@ class Model:
         discriminator_activation = partial(keras.activations.relu, alpha=0.3)
         with tf.name_scope("Discriminator"):
             discriminator = Sequential(name="Discriminator")
-            discriminator.add(L.InputLayer([Y_DIMS]))
+            discriminator.add(L.InputLayer([X_DIMS + Y_DIMS]))
             for i in range(n_hidden_layers):
                 discriminator.add(L.Dense(output_dim, activation=discriminator_activation))         
             if GAN_TYPE == "Jensen-Shannon":
                 discriminator.add(L.Dense(2, activation=tf.nn.log_softmax))
 
+        XY = pd.concat([X, Y], axis=1)
+        
         train_batch_size = int(1e3)
-        real_data = get_tf_dataset(Y, train_batch_size)
+        real_data = get_tf_dataset(XY, train_batch_size)
         real_data = tf.dtypes.cast(real_data, tf.float32)
-        discriminator_real = discriminator(real_data)
-
 
         noise_batch_size = tf.placeholder(tf.int32, shape=[], name="noise_batch_size")
-        noise = tf.random_normal([noise_batch_size, X_DIMS], dtype=tf.float32, name="noise")
+        noise = tf.random_normal([noise_batch_size, NOISE_DIMS], dtype=tf.float32, name="noise")
         X_fetched = get_tf_dataset(X, train_batch_size)
         X_fetched = tf.dtypes.cast(X_fetched, tf.float32)
         generated_data = generator(tf.concat([X_fetched, noise], axis=1))
+        generated_data = tf.concat([X_fetched, generated_data], axis=1)
         
         logp_real = discriminator(real_data)
         logp_gen = discriminator(generated_data)
@@ -69,7 +71,7 @@ class Model:
         generator_loss = -tf.reduce_mean(logp_gen[:,1])
         
         tf_iter = tf.Variable(initial_value=0, dtype=tf.int32)
-        learning_rate = tf.train.exponential_decay(4e-4, tf_iter, 200, 0.98)
+        learning_rate = tf.train.exponential_decay(5e-4, tf_iter, 150, 0.98)
         gen_optimizer = tf.group(
             tf.train.AdamOptimizer(learning_rate).minimize(generator_loss, var_list=generator.trainable_weights),
             tf.assign_add(tf_iter, 1))
@@ -90,12 +92,12 @@ class Model:
     
         self.generator = generator
         self.y_cols = Y.columns
-        self.X_DIMS = X_DIMS
+        self.NOISE_DIMS = NOISE_DIMS
         self.sess = sess
 
-    def predict(self, X): 
-        noise = sample_noise_batch(bsize=len(X), X_DIMS=self.X_DIMS)
-        Y_pred = generator.predict(np.concatenate([X, noise], axis=1))
+    def predict(self, X):
+        noise = sample_noise_batch(bsize=len(X), NOISE_DIMS=self.NOISE_DIMS)
+        Y_pred = self.generator.predict(np.concatenate([X, noise], axis=1))
         Y_pred = pd.DataFrame(Y_pred)
         Y_pred.columns = self.y_cols
         return Y_pred
